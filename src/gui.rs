@@ -1,5 +1,5 @@
 use crate::{
-    GZ_VERSION, do_extract_ui, do_repack, is_ready_to_patch, iso_tools::GameVersion, patcher,
+    CURRENT_VERSION, do_extract_ui, do_repack, is_ready_to_patch, iso_tools::GameVersion, patcher,
 };
 use dioxus::prelude::*;
 use std::sync::mpsc;
@@ -61,7 +61,7 @@ pub fn Title() -> Element {
             class: "header",
             h1 {
                 class: "main-title",
-                "SSGZ Version {GZ_VERSION}"
+                "SSGZ Version {CURRENT_VERSION}"
             }
             h2 {
                 class: "sub-title",

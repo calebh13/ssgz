@@ -1,6 +1,6 @@
 [package]
 name = "ssgz"
-version = "0.3.0"
+version = "0.2.0"
 edition = "2024"
 
 # Want to let end users run the patcher from source w/o needing to build asm patches
@@ -24,6 +24,8 @@ dialoguer = "0.11.0"
 dioxus = { version = "0.6.0" }
 futures = "0.3.31"
 tokio = "1.45.1"
+self_update = "0.42.0"
+semver = "1.0.26"
 
 [features]
 default = ["desktop"]

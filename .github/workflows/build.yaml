@@ -1,6 +1,7 @@
 on:
   push:
     branches: [ main ]
+    tags: ['v*']
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -150,3 +151,19 @@ jobs:
         with:
           name: SSGZ ${{ steps.read_toml.outputs.value }} (${{ matrix.artifact }}${{ matrix.artifact_suffix }})
           path: dist
+      - name: Zip and rename
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd dist
+          zip -r ../SSGZ.${{ steps.read_toml.outputs.value }}.${{ matrix.artifact }}${{ matrix.artifact_suffix }}.zip .
+        shell: bash
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            SSGZ.${{ steps.read_toml.outputs.value }}.${{ matrix.artifact }}${{ matrix.artifact_suffix }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
