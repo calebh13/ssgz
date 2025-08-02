@@ -151,6 +151,7 @@ jobs:
         with:
           name: SSGZ ${{ steps.read_toml.outputs.value }} (${{ matrix.artifact }}${{ matrix.artifact_suffix }})
           path: dist
+          
       - name: Zip and rename
         if: startsWith(github.ref, 'refs/tags/')
         run: |
