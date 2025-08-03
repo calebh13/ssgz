@@ -12,7 +12,7 @@ use dialoguer::Confirm;
 use indicatif::ProgressBar;
 use iso_tools::*;
 use rfd::FileDialog;
-use std::{env, fs, time::Duration};
+use std::fs;
 use semver::Version;
 use self_update::{self, backends::github::Update, cargo_crate_version};
 
@@ -32,7 +32,7 @@ struct Args {
     game_version: Option<GameVersion>,
 }
 
-fn current_platform_suffix() -> &'static str {
+fn get_release_platform() -> &'static str {
     if cfg!(target_os = "windows") {
         "windows"
     } else if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
@@ -46,22 +46,24 @@ fn current_platform_suffix() -> &'static str {
     }
 }
 
-fn check_for_updates(args: &Args) -> anyhow::Result<()> {
-    let target_name = format!("SSGZ.{CURRENT_VERSION}.{}.zip", current_platform_suffix());
+// Returns asset name if an update is available
+fn check_for_update() -> anyhow::Result<Option<String>> {
+    let platform = get_release_platform();
 
     let update = self_update::backends::github::Update::configure()
         .repo_owner(REPO_OWNER)
         .repo_name(REPO_NAME)
-        .bin_name(BIN_NAME) // or "ssgz.exe" on Windows, if needed
+        .bin_name(BIN_NAME)
         .show_download_progress(true)
         .current_version(CURRENT_VERSION)
-        .target(&target_name)
         .build()?;
 
+    let release = update.get_latest_release()?;
 
-    let release = update
-        .get_latest_release()
-        .context("Failed to fetch latest GitHub release")?;
+    let asset = release.assets
+        .into_iter()
+        .find(|asset| asset.name.contains(platform))
+        .with_context(|| format!("Failed to find release for {}", platform))?;
 
     let latest_version = Version::parse(&release.version)
         .context("Failed to parse latest version from GitHub")?;
@@ -71,7 +73,7 @@ fn check_for_updates(args: &Args) -> anyhow::Result<()> {
 
     if latest_version <= current_version {
         println!("Already up to date: v{}", CURRENT_VERSION);
-        return Ok(());
+        return Ok(None);
     }
 
     println!(
@@ -79,21 +81,18 @@ fn check_for_updates(args: &Args) -> anyhow::Result<()> {
         CURRENT_VERSION, latest_version.to_string()
     );
 
-    // TODO: figure out how we want to handle this
-    // let exe_path_str = env::current_exe()
-    //     .context("Failed to get current executable path")?
-    //     .to_string_lossy()
-    //     .to_string();
-    
-    // if exe_path_str.contains("target/release") || exe_path_str.contains("target/debug") {
-    //     println!("Running from source; skipping automatic update.");
-    //     println!("Please update manually using git pull && cargo build");
-    //     return Ok(());
-    // }
+    if cfg!(debug_assertions) {
+        println!("Debug build; skipping automatic update.");
+        return Ok(None);
+    } else {
+        return Ok(Some(asset.name));
+    }
+}
 
+fn do_update_noui(asset_name: &str) -> anyhow::Result<()> {
     if !Confirm::new()
         .with_prompt("Do you want to update now?")
-        .default(false)
+        .default(true)
         .interact()
         .context("Failed to read user input")?
     {
@@ -101,28 +100,22 @@ fn check_for_updates(args: &Args) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // If not running from source, download and show progress bar
-    let pb = ProgressBar::new_spinner();
-    pb.enable_steady_tick(Duration::from_millis(100));
-    pb.set_message("Downloading update ...");
-
     let status = Update::configure()
         .repo_owner(REPO_OWNER)
         .repo_name(REPO_NAME)
         .bin_name(BIN_NAME)
-        .show_output(false) // we'll show our own output
+        .show_output(true)
+        .no_confirm(true)
+        .target(asset_name)
         .current_version(&CURRENT_VERSION.to_string())
         .build()
         .context("Failed to configure self-update for actual download")?
         .update()
         .context("Update failed")?;
 
-    pb.finish_and_clear();
-
     println!("Updated successfully to v{}!", status.version());
     Ok(())
 }
-
 
 fn fix_macos_working_directory() -> anyhow::Result<()> {
     // If in a .app file, we need to fix working directory to the bundle's location
@@ -161,7 +154,6 @@ fn fix_macos_working_directory() -> anyhow::Result<()> {
 fn main() -> anyhow::Result<()> {
     fix_macos_working_directory()?;
     let args = Args::parse();
-    check_for_updates(&args)?;
     if args.noui {
         if let Some(ver) = args.game_version {
             do_noui(ver)
@@ -179,6 +171,10 @@ pub fn is_ready_to_patch(version: GameVersion) -> bool {
 }
 
 fn do_noui(version: GameVersion) -> anyhow::Result<()> {
+    if let Some(asset_name) = check_for_update()? {
+        do_update_noui(&asset_name)?;
+    }
+
     assert!(version.is_supported()); // arg parser should only accept supported versions
 
     println!("Starting SSGZ Patcher {CURRENT_VERSION} for the {version} version");
