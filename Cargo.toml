@@ -32,8 +32,6 @@ env_logger = "0.11.8"
 default = ["desktop"]
 desktop = ["dioxus/desktop"]
 
-[profile]
-
 [profile.wasm-dev]
 inherits = "dev"
 opt-level = 1

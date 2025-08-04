@@ -12,14 +12,20 @@ use dialoguer::Confirm;
 use indicatif::ProgressBar;
 use iso_tools::*;
 use rfd::FileDialog;
-use std::fs;
-use semver::Version;
 use self_update::{self, backends::github::Update, cargo_crate_version};
+use semver::Version;
+use std::{
+    env, fs,
+    io::{self, Write},
+    process::Command,
+    thread,
+    time::Duration,
+};
 
 pub const CURRENT_VERSION: &str = cargo_crate_version!();
 
 const REPO_OWNER: &str = "calebh13";
-const REPO_NAME: &str = "ssgz";    
+const REPO_NAME: &str = "ssgz";
 const BIN_NAME: &str = "ssgz";
 
 #[derive(Parser, Debug)]
@@ -60,16 +66,17 @@ fn check_for_update() -> anyhow::Result<Option<String>> {
 
     let release = update.get_latest_release()?;
 
-    let asset = release.assets
+    let asset = release
+        .assets
         .into_iter()
         .find(|asset| asset.name.contains(platform))
         .with_context(|| format!("Failed to find release for {}", platform))?;
 
-    let latest_version = Version::parse(&release.version)
-        .context("Failed to parse latest version from GitHub")?;
+    let latest_version =
+        Version::parse(&release.version).context("Failed to parse latest version from GitHub")?;
 
-    let current_version = Version::parse(CURRENT_VERSION)
-        .context("Failed to parse current version")?;
+    let current_version =
+        Version::parse(CURRENT_VERSION).context("Failed to parse current version")?;
 
     if latest_version <= current_version {
         println!("Already up to date: v{}", CURRENT_VERSION);
@@ -78,7 +85,8 @@ fn check_for_update() -> anyhow::Result<Option<String>> {
 
     println!(
         "Update available: v{} → v{}",
-        CURRENT_VERSION, latest_version.to_string()
+        CURRENT_VERSION,
+        latest_version.to_string()
     );
 
     if cfg!(debug_assertions) {
@@ -89,18 +97,8 @@ fn check_for_update() -> anyhow::Result<Option<String>> {
     }
 }
 
-fn do_update_noui(asset_name: &str) -> anyhow::Result<()> {
-    if !Confirm::new()
-        .with_prompt("Do you want to update now?")
-        .default(true)
-        .interact()
-        .context("Failed to read user input")?
-    {
-        println!("Update canceled.");
-        return Ok(());
-    }
-
-    let status = Update::configure()
+fn perform_update(asset_name: &str) -> anyhow::Result<()> {
+    let _status = Update::configure()
         .repo_owner(REPO_OWNER)
         .repo_name(REPO_NAME)
         .bin_name(BIN_NAME)
@@ -112,8 +110,15 @@ fn do_update_noui(asset_name: &str) -> anyhow::Result<()> {
         .context("Failed to configure self-update for actual download")?
         .update()
         .context("Update failed")?;
+    Ok(())
+}
 
-    println!("Updated successfully to v{}!", status.version());
+fn restart_app() -> anyhow::Result<()> {
+    let current_exe = env::current_exe()?;
+
+    // grab CLI args, ignoring the first one (the executable path)
+    let args: Vec<_> = env::args_os().skip(1).collect();
+
     Ok(())
 }
 
@@ -171,8 +176,20 @@ pub fn is_ready_to_patch(version: GameVersion) -> bool {
 }
 
 fn do_noui(version: GameVersion) -> anyhow::Result<()> {
+    println!("SSGZ v{}", CURRENT_VERSION);
     if let Some(asset_name) = check_for_update()? {
-        do_update_noui(&asset_name)?;
+        if !Confirm::new()
+            .with_prompt("Do you want to update now?")
+            .default(true)
+            .interact()
+            .context("Failed to read user input")?
+        {
+            println!("Update canceled.");
+            return Ok(());
+        }
+        perform_update(&asset_name)?;
+        println!("Update complete! Restarting ...");
+        restart_app()?;
     }
 
     assert!(version.is_supported()); // arg parser should only accept supported versions

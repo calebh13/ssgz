@@ -1,5 +1,6 @@
 use crate::{
-    CURRENT_VERSION, do_extract_ui, do_repack, is_ready_to_patch, iso_tools::GameVersion, patcher,
+    CURRENT_VERSION, check_for_update, do_extract_ui, do_repack, is_ready_to_patch,
+    iso_tools::GameVersion, patcher, perform_update, restart_app,
 };
 use dioxus::prelude::*;
 use std::sync::mpsc;
@@ -18,6 +19,7 @@ fn App() -> Element {
     rsx! {
         document::Link { rel: "favicon", href: FAVICON }
         document::Link { rel: "stylesheet", href: MAIN_CSS }
+        UpdateChecker {}
         GZ {}
     }
 }
@@ -36,6 +38,92 @@ fn do_patch<T: FnMut(u8)>(version: GameVersion, cb: &mut T) -> anyhow::Result<()
         do_repack(version, cb)?;
     }
     Ok(())
+}
+
+#[component]
+fn UpdateChecker() -> Element {
+    let mut pending_update = use_signal(|| None::<String>);
+    let mut show_confirm_popup = use_signal(|| false);
+    let mut show_result_popup = use_signal(|| false);
+    let mut result_message = use_signal(|| None::<String>);
+
+    // Run the update check once when component mounts
+    use_effect(move || {
+        spawn(async move {
+            match check_for_update() {
+                Ok(Some(asset_name)) => {
+                    pending_update.set(Some(asset_name));
+                    show_confirm_popup.set(true);
+                }
+                Ok(None) => {
+                    // no update, do nothing
+                }
+                Err(e) => {
+                    result_message.set(Some(format!("Update check failed: {}", e)));
+                    show_result_popup.set(true);
+                }
+            }
+        });
+    });
+
+    rsx! {
+        // Confirm update popup
+        if *show_confirm_popup.read() {
+            div {
+                class: "popup-overlay",
+                div {
+                    class: "popup-content",
+                    h3 { "An update is available. Would you like to update now?" }
+                    button {
+                        class: "btn extract-btn",
+                        onclick: move |_evt| {
+                            show_confirm_popup.set(false);
+
+                            if let Some(asset_name) = pending_update.read().clone() {
+                                spawn(async move {
+                                    match perform_update(&asset_name) {
+                                        Ok(()) => {
+                                            result_message.set(Some("Update complete!".to_string()));
+                                        }
+                                        Err(e) => {
+                                            result_message.set(Some(format!("Update failed: {}", e)));
+                                        }
+                                    }
+                                    show_result_popup.set(true);
+                                });
+                            }
+                        },
+                        "Yes"
+                    }
+                    button {
+                        class: "btn extract-btn",
+                        onclick: move |_evt| {
+                            show_confirm_popup.set(false);
+                        },
+                        "No"
+                    }
+                }
+            }
+        }
+
+        // Result popup
+        if *show_result_popup.read() {
+            div {
+                class: "popup-overlay",
+                div {
+                    class: "popup-content",
+                    h3 { "{result_message.read().as_deref().unwrap_or_default()}" }
+                    button {
+                        class: "btn extract-btn",
+                        onclick: move |_evt| {
+                            show_result_popup.set(false);
+                        },
+                        "OK"
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[component]
